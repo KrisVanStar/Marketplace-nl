@@ -114,6 +114,17 @@ button:hover { opacity: 0.9; }
 
 .hidden { display: none !important; }
 
+.error-banner {
+  background: #3a1414;
+  border: 1px solid var(--high);
+  color: #fecaca;
+  padding: 0.9rem 1.1rem;
+  border-radius: 8px;
+  margin-bottom: 1rem;
+  font-size: 0.9rem;
+  line-height: 1.4;
+}
+
 .filters {
   display: flex;
   gap: 0.6rem;

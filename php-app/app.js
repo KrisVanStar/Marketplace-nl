@@ -3,9 +3,42 @@ const $ = (sel) => document.querySelector(sel);
 let categories = [];
 let pollTimer = null;
 
+function showFatalError(message) {
+  let banner = document.getElementById("fatal-error-banner");
+  if (!banner) {
+    banner = document.createElement("div");
+    banner.id = "fatal-error-banner";
+    banner.className = "error-banner";
+    document.querySelector("main").prepend(banner);
+  }
+  banner.textContent = message;
+  banner.classList.remove("hidden");
+}
+
+function clearFatalError() {
+  const banner = document.getElementById("fatal-error-banner");
+  if (banner) banner.classList.add("hidden");
+}
+
 async function loadCategories() {
-  const res = await fetch("/api/categories.php");
-  categories = await res.json();
+  try {
+    const res = await fetch("api/categories.php");
+    if (!res.ok) {
+      throw new Error(`HTTP ${res.status} bij api/categories.php`);
+    }
+    categories = await res.json();
+    if (!Array.isArray(categories) || categories.length === 0) {
+      throw new Error("Lege categorieënlijst ontvangen");
+    }
+  } catch (err) {
+    showFatalError(
+      `Kon categorieën niet laden (${err.message}). Controleer of config.php bestaat op de server, ` +
+        `of de bestanden in de juiste map staan (zie README.md), en open de pagina via de juiste URL ` +
+        `(niet als lokaal bestand).`
+    );
+    return;
+  }
+  clearFatalError();
   const scanSelect = $("#category");
   const filterSelect = $("#filter-category");
   scanSelect.innerHTML = categories.map((c) => `<option value="${c}">${c.replace(/_/g, " ")}</option>`).join("");
@@ -36,10 +69,10 @@ function currentFilters() {
 
 async function loadLeads() {
   const params = currentFilters();
-  const res = await fetch(`/api/leads.php?${params.toString()}`);
+  const res = await fetch(`api/leads.php?${params.toString()}`);
   const leads = await res.json();
   renderLeads(leads);
-  $("#export-btn").href = `/api/export_csv.php?${params.toString()}`;
+  $("#export-btn").href = `api/export_csv.php?${params.toString()}`;
 }
 
 function renderLeads(leads) {
@@ -76,7 +109,7 @@ function renderLeads(leads) {
     statusSelect.addEventListener("click", (e) => e.stopPropagation());
     statusSelect.addEventListener("change", async (e) => {
       e.stopPropagation();
-      await fetch(`/api/lead_update.php`, {
+      await fetch(`api/lead_update.php`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ id: lead.id, status: statusSelect.value }),
@@ -90,7 +123,7 @@ function renderLeads(leads) {
 }
 
 async function openDetail(id) {
-  const res = await fetch(`/api/lead_detail.php?id=${id}`);
+  const res = await fetch(`api/lead_detail.php?id=${id}`);
   if (!res.ok) return;
   const lead = await res.json();
   const reasons = (lead.latest_reasons || []).map((r) => `<li>${r}</li>`).join("");
@@ -108,7 +141,7 @@ async function openDetail(id) {
   `;
   $("#rescan-btn").addEventListener("click", async () => {
     $("#rescan-btn").textContent = "Bezig...";
-    await fetch(`/api/lead_rescan.php`, {
+    await fetch(`api/lead_rescan.php`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ id }),
@@ -135,7 +168,7 @@ $("#scan-form").addEventListener("submit", async (e) => {
   const category = $("#category").value;
   const limit = parseInt($("#limit").value, 10) || 20;
 
-  const res = await fetch("/api/scan_discover.php", {
+  const res = await fetch("api/scan_discover.php", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ city, category, limit }),
@@ -155,7 +188,7 @@ function pollJob(jobId) {
   if (pollTimer) clearInterval(pollTimer);
 
   pollTimer = setInterval(async () => {
-    const res = await fetch(`/api/scan_status.php?id=${jobId}`);
+    const res = await fetch(`api/scan_status.php?id=${jobId}`);
     if (!res.ok) return;
     const job = await res.json();
     let note = "";
@@ -182,7 +215,7 @@ $("#import-form").addEventListener("submit", async (e) => {
   statusEl.classList.remove("hidden");
   statusEl.textContent = "Bezig met importeren en scannen...";
 
-  const res = await fetch("/api/leads_import.php", { method: "POST", body: formData });
+  const res = await fetch("api/leads_import.php", { method: "POST", body: formData });
   const data = await res.json();
   if (res.ok) {
     statusEl.textContent = `${data.imported} leads geïmporteerd. Eerste batch gescand, rest volgt via cron.`;

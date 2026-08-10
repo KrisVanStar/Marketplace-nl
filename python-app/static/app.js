@@ -3,9 +3,41 @@ const $ = (sel) => document.querySelector(sel);
 let categories = [];
 let pollTimer = null;
 
+function showFatalError(message) {
+  let banner = document.getElementById("fatal-error-banner");
+  if (!banner) {
+    banner = document.createElement("div");
+    banner.id = "fatal-error-banner";
+    banner.className = "error-banner";
+    document.querySelector("main").prepend(banner);
+  }
+  banner.textContent = message;
+  banner.classList.remove("hidden");
+}
+
+function clearFatalError() {
+  const banner = document.getElementById("fatal-error-banner");
+  if (banner) banner.classList.add("hidden");
+}
+
 async function loadCategories() {
-  const res = await fetch("/api/categories");
-  categories = await res.json();
+  try {
+    const res = await fetch("api/categories");
+    if (!res.ok) {
+      throw new Error(`HTTP ${res.status} bij api/categories`);
+    }
+    categories = await res.json();
+    if (!Array.isArray(categories) || categories.length === 0) {
+      throw new Error("Lege categorieënlijst ontvangen");
+    }
+  } catch (err) {
+    showFatalError(
+      `Kon categorieën niet laden (${err.message}). Controleer of de server draait en de pagina via de ` +
+        `juiste URL wordt geopend (niet als lokaal bestand).`
+    );
+    return;
+  }
+  clearFatalError();
   const scanSelect = $("#category");
   const filterSelect = $("#filter-category");
   scanSelect.innerHTML = categories.map((c) => `<option value="${c}">${c.replace(/_/g, " ")}</option>`).join("");
@@ -36,10 +68,10 @@ function currentFilters() {
 
 async function loadLeads() {
   const params = currentFilters();
-  const res = await fetch(`/api/leads?${params.toString()}`);
+  const res = await fetch(`api/leads?${params.toString()}`);
   const leads = await res.json();
   renderLeads(leads);
-  $("#export-btn").href = `/api/export.csv?${params.toString()}`;
+  $("#export-btn").href = `api/export.csv?${params.toString()}`;
 }
 
 function renderLeads(leads) {
@@ -76,7 +108,7 @@ function renderLeads(leads) {
     statusSelect.addEventListener("click", (e) => e.stopPropagation());
     statusSelect.addEventListener("change", async (e) => {
       e.stopPropagation();
-      await fetch(`/api/leads/${lead.id}`, {
+      await fetch(`api/leads/${lead.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status: statusSelect.value }),
@@ -90,7 +122,7 @@ function renderLeads(leads) {
 }
 
 async function openDetail(id) {
-  const res = await fetch(`/api/leads/${id}`);
+  const res = await fetch(`api/leads/${id}`);
   if (!res.ok) return;
   const lead = await res.json();
   const reasons = (lead.latest_reasons || []).map((r) => `<li>${r}</li>`).join("");
@@ -108,7 +140,7 @@ async function openDetail(id) {
   `;
   $("#rescan-btn").addEventListener("click", async () => {
     $("#rescan-btn").textContent = "Bezig...";
-    await fetch(`/api/leads/${id}/rescan`, { method: "POST" });
+    await fetch(`api/leads/${id}/rescan`, { method: "POST" });
     await openDetail(id);
     await loadLeads();
   });
@@ -131,7 +163,7 @@ $("#scan-form").addEventListener("submit", async (e) => {
   const category = $("#category").value;
   const limit = parseInt($("#limit").value, 10) || 20;
 
-  const res = await fetch("/api/scan/discover", {
+  const res = await fetch("api/scan/discover", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ city, category, limit }),
@@ -152,7 +184,7 @@ function pollJob(jobId) {
   if (pollTimer) clearInterval(pollTimer);
 
   pollTimer = setInterval(async () => {
-    const res = await fetch(`/api/scan/status/${jobId}`);
+    const res = await fetch(`api/scan/status/${jobId}`);
     if (!res.ok) return;
     const job = await res.json();
     statusEl.textContent = `Status: ${job.status} — ${job.processed}/${job.total} gescand — ${job.found_leads} kansrijke leads. ${job.message || ""}`;
@@ -175,7 +207,7 @@ $("#import-form").addEventListener("submit", async (e) => {
   statusEl.classList.remove("hidden");
   statusEl.textContent = "Bezig met importeren en scannen...";
 
-  const res = await fetch("/api/leads/import", { method: "POST", body: formData });
+  const res = await fetch("api/leads/import", { method: "POST", body: formData });
   const data = await res.json();
   statusEl.textContent = res.ok ? `${data.imported} leads geïmporteerd en gescand.` : data.detail || "Import mislukt";
   loadLeads();
