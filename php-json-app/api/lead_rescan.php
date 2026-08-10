@@ -19,7 +19,6 @@ if (!$business) {
     json_error('Lead not found', 404);
 }
 
-scan_and_store($id, $business['website']);
+scan_and_store($id, $business);
 
-$scan = latest_scan_for($id);
-json_response(lead_row_to_array($business, $scan));
+json_response(lead_row_to_array($business, latest_scan_for($id)));

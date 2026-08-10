@@ -9,45 +9,69 @@
 <body>
 <header>
   <h1>Marketplace-NL <span>Lead Scanner</span></h1>
-  <p class="subtitle">Vind kleine Nederlandse bedrijven met een verouderde website</p>
+  <p class="subtitle">Vind kleine Nederlandse bedrijven met een verouderde of ontbrekende website</p>
 </header>
 
 <main>
   <section class="panel" id="scan-panel">
-    <h2>Nieuwe scan starten</h2>
+    <h2>Bedrijven zoeken</h2>
     <form id="scan-form">
       <div class="field">
-        <label for="city">Stad</label>
+        <label for="city">Plaats</label>
         <input type="text" id="city" name="city" placeholder="bijv. Utrecht" required>
       </div>
       <div class="field">
-        <label for="category">Categorie</label>
+        <label for="category">Branche</label>
         <select id="category" name="category" required></select>
       </div>
       <div class="field">
-        <label for="limit">Aantal (max)</label>
+        <label for="limit">Max. aantal</label>
         <input type="number" id="limit" name="limit" value="20" min="1" max="50">
       </div>
-      <button type="submit">Scan starten</button>
+      <label class="checkbox-field">
+        <input type="checkbox" id="only-no-website">
+        Alleen bedrijven zonder website
+      </label>
+      <button type="submit">Zoeken en analyseren</button>
     </form>
+    <p class="hint">
+      Tip: begint de zoekopdracht met weinig resultaten? Kies de branche
+      &ldquo;Alle bedrijven&rdquo; — niet elk bedrijf is in OpenStreetMap onder een specifieke branche vastgelegd.
+    </p>
     <div id="job-status" class="job-status hidden"></div>
   </section>
 
   <section class="panel">
-    <h2>CSV importeren (handmatige lijst)</h2>
-    <p class="hint">Kolommen: name, website, city, category, address, phone (alleen name + website verplicht)</p>
+    <h2>Eigen lijst importeren (CSV)</h2>
+    <p class="hint">
+      Kolommen: <code>name</code> (verplicht), <code>website</code>, <code>city</code>,
+      <code>address</code>, <code>postcode</code>, <code>phone</code>, <code>email</code>,
+      <code>category</code>. Rijen zonder website worden ook geanalyseerd en als &ldquo;geen
+      website&rdquo; gemarkeerd.
+    </p>
     <form id="import-form">
       <input type="file" id="csv-file" name="file" accept=".csv" required>
-      <button type="submit">Importeren en scannen</button>
+      <button type="submit">Importeren en analyseren</button>
     </form>
     <div id="import-status" class="job-status hidden"></div>
   </section>
 
   <section class="panel" id="leads-panel">
-    <h2>Leads</h2>
+    <div class="panel-head">
+      <h2>Leads <span id="leads-count" class="count-pill"></span></h2>
+      <a id="export-btn" href="api/export_csv.php">Exporteer CSV</a>
+    </div>
     <div class="filters">
-      <input type="text" id="filter-city" placeholder="Filter op stad">
-      <select id="filter-category"><option value="">Alle categorieën</option></select>
+      <input type="text" id="filter-city" placeholder="Filter op plaats">
+      <select id="filter-category"><option value="">Alle branches</option></select>
+      <select id="filter-priority">
+        <option value="">Alle prioriteiten</option>
+        <option value="no_website">Geen website</option>
+        <option value="high">Hoog</option>
+        <option value="medium">Gemiddeld</option>
+        <option value="low">Laag</option>
+        <option value="unreachable">Onbereikbaar</option>
+      </select>
       <select id="filter-status">
         <option value="">Alle statussen</option>
         <option value="new">Nieuw</option>
@@ -55,33 +79,39 @@
         <option value="won">Gewonnen</option>
         <option value="ignored">Genegeerd</option>
       </select>
+      <select id="filter-sort">
+        <option value="score_desc">Hoogste score eerst</option>
+        <option value="score_asc">Laagste score eerst</option>
+        <option value="newest">Nieuwste eerst</option>
+        <option value="name">Op naam</option>
+      </select>
       <label class="min-score-label">Min. score
         <input type="number" id="filter-min-score" value="0" min="0" max="100">
       </label>
-      <button id="refresh-btn">Vernieuwen</button>
-      <a id="export-btn" href="api/export_csv.php">Exporteer CSV</a>
+      <button id="refresh-btn" type="button">Vernieuwen</button>
     </div>
-    <table id="leads-table">
-      <thead>
-        <tr>
-          <th>Score</th>
-          <th>Bedrijf</th>
-          <th>Stad</th>
-          <th>Categorie</th>
-          <th>Website</th>
-          <th>Status</th>
-          <th></th>
-        </tr>
-      </thead>
-      <tbody id="leads-body"></tbody>
-    </table>
-    <p id="empty-state" class="hint hidden">Nog geen leads. Start hierboven een scan.</p>
+    <div class="table-scroll">
+      <table id="leads-table">
+        <thead>
+          <tr>
+            <th>Score</th>
+            <th>Bedrijf</th>
+            <th>Plaats</th>
+            <th>Website</th>
+            <th>Belangrijkste probleem</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody id="leads-body"></tbody>
+      </table>
+    </div>
+    <p id="empty-state" class="hint hidden">Nog geen leads. Start hierboven een zoekopdracht.</p>
   </section>
 </main>
 
 <div id="detail-modal" class="modal hidden">
   <div class="modal-content">
-    <button id="modal-close" class="modal-close">&times;</button>
+    <button id="modal-close" class="modal-close" aria-label="Sluiten">&times;</button>
     <div id="modal-body"></div>
   </div>
 </div>

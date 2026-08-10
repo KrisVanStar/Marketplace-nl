@@ -2,35 +2,45 @@
 declare(strict_types=1);
 require_once __DIR__ . '/../includes/bootstrap.php';
 require_once __DIR__ . '/../includes/leads.php';
+require_once __DIR__ . '/../includes/tasks.php';
 
 require_method('POST');
 
 $payload = read_json_body();
 $id = clamp_int($payload['id'] ?? null, 1, PHP_INT_MAX, 0);
-$status = trim((string) ($payload['status'] ?? ''));
-
 if ($id === 0) {
     json_error('id is required');
 }
-if (!in_array($status, ['new', 'contacted', 'won', 'ignored'], true)) {
-    json_error('Invalid status');
-}
 
 $pdo = db();
-$stmt = $pdo->prepare('SELECT id FROM businesses WHERE id = ?');
-$stmt->execute([$id]);
-if (!$stmt->fetchColumn()) {
+if (!find_business($pdo, $id)) {
     json_error('Lead not found', 404);
 }
 
-$pdo->prepare('UPDATE businesses SET status = ? WHERE id = ?')->execute([$status, $id]);
+$updated = false;
+if (isset($payload['status'])) {
+    $status = trim((string) $payload['status']);
+    if (!in_array($status, ['new', 'contacted', 'won', 'ignored'], true)) {
+        json_error('Invalid status');
+    }
+    $pdo->prepare('UPDATE businesses SET status = ? WHERE id = ?')->execute([$status, $id]);
+    $updated = true;
+}
+if (isset($payload['notes'])) {
+    $pdo->prepare('UPDATE businesses SET notes = ? WHERE id = ?')
+        ->execute([mb_substr(trim((string) $payload['notes']), 0, 2000), $id]);
+    $updated = true;
+}
+if (!$updated) {
+    json_error('Niets om bij te werken (verwacht status en/of notes)');
+}
 
-$stmt = $pdo->prepare(
-    "SELECT b.*, s.score AS latest_score, s.priority AS latest_priority,
-            s.reasons_json AS latest_reasons_json, s.scanned_at AS scanned_at
-     FROM businesses b
-     LEFT JOIN scans s ON s.id = (SELECT id FROM scans WHERE business_id = b.id ORDER BY id DESC LIMIT 1)
-     WHERE b.id = ?"
-);
-$stmt->execute([$id]);
-json_response(lead_row_to_array($stmt->fetch()));
+$business = find_business($pdo, $id);
+$scan = latest_scan_for($pdo, $id);
+json_response(lead_row_to_array(array_merge($business, [
+    'latest_score' => $scan['score'] ?? null,
+    'latest_priority' => $scan['priority'] ?? null,
+    'latest_summary' => $scan['summary'] ?? null,
+    'latest_reasons_json' => $scan['reasons_json'] ?? null,
+    'scanned_at' => $scan['scanned_at'] ?? null,
+])));

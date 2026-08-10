@@ -2,42 +2,118 @@
 declare(strict_types=1);
 
 /**
- * Finds small Dutch businesses that list a website, via OpenStreetMap.
+ * Finds small Dutch businesses via OpenStreetMap.
  * Nominatim geocodes a city name to a bounding box; Overpass API then
- * queries OSM for businesses inside that box with a `website` tag. Both
- * are free, keyless, community-run services with strict rate limits, so
- * only one request is made at a time.
+ * queries OSM for businesses inside that box.
+ *
+ * Note: we deliberately do NOT require a `website` tag. Most small
+ * businesses in OSM have no website tag at all, and a business with no
+ * website is the single best lead there is — so those are kept and
+ * flagged instead of filtered away. (Requiring the tag was why searches
+ * so often came back empty.)
  */
 
 const NOMINATIM_URL = 'https://nominatim.openstreetmap.org/search';
-const OVERPASS_URL = 'https://overpass-api.de/api/interpreter';
 
-// category label -> list of [osm_key, osm_value] tag filters. Chosen to
-// skew towards small/independent local businesses rather than big chains.
+/** Public Overpass instances, tried in order until one answers. */
+function overpass_endpoints(): array
+{
+    $configured = app_config()['overpass_endpoints'] ?? [];
+    if (!empty($configured) && is_array($configured)) {
+        return $configured;
+    }
+    return [
+        'https://overpass-api.de/api/interpreter',
+        'https://overpass.kumi.systems/api/interpreter',
+        'https://overpass.osm.ch/api/interpreter',
+    ];
+}
+
+function nominatim_url(): string
+{
+    return app_config()['nominatim_url'] ?? NOMINATIM_URL;
+}
+
+/**
+ * category slug => ['label' => Dutch label, 'filters' => [Overpass tag selectors]]
+ * Multiple selectors are OR-ed together. Selectors are raw Overpass
+ * filters so a category can match a whole key (e.g. any ["craft"]).
+ */
 function categories(): array
 {
     return [
-        'restaurant' => [['amenity', 'restaurant']],
-        'cafe' => [['amenity', 'cafe']],
-        'hairdresser' => [['shop', 'hairdresser']],
-        'beauty_salon' => [['shop', 'beauty']],
-        'bakery' => [['shop', 'bakery']],
-        'butcher' => [['shop', 'butcher']],
-        'florist' => [['shop', 'florist']],
-        'garage_car_repair' => [['shop', 'car_repair']],
-        'plumber' => [['craft', 'plumber']],
-        'electrician' => [['craft', 'electrician']],
-        'carpenter' => [['craft', 'carpenter']],
-        'dentist' => [['amenity', 'dentist']],
-        'physiotherapist' => [['healthcare', 'physiotherapist']],
-        'law_office' => [['office', 'lawyer']],
-        'accountant' => [['office', 'accountant']],
-        'real_estate' => [['office', 'estate_agent']],
-        'architect' => [['office', 'architect']],
-        'gym' => [['leisure', 'fitness_centre']],
-        'clothing_store' => [['shop', 'clothes']],
-        'furniture_store' => [['shop', 'furniture']],
+        'all' => [
+            'label' => 'Alle bedrijven (breedste zoekopdracht)',
+            'filters' => [
+                '["shop"]',
+                '["craft"]',
+                '["office"]',
+                '["healthcare"]',
+                '["amenity"~"^(restaurant|cafe|bar|pub|fast_food|dentist|doctors|veterinary|pharmacy|driving_school|childcare)$"]',
+                '["leisure"~"^(fitness_centre|sports_centre|dance)$"]',
+                '["tourism"~"^(hotel|guest_house|bed_and_breakfast|apartment)$"]',
+            ],
+        ],
+        'restaurant' => ['label' => 'Restaurant', 'filters' => ['["amenity"="restaurant"]']],
+        'cafe' => ['label' => 'Café / lunchroom', 'filters' => ['["amenity"="cafe"]']],
+        'bar_pub' => ['label' => 'Bar / café (kroeg)', 'filters' => ['["amenity"="bar"]', '["amenity"="pub"]']],
+        'fast_food' => ['label' => 'Snackbar / afhaal', 'filters' => ['["amenity"="fast_food"]']],
+        'hotel_bnb' => [
+            'label' => 'Hotel / B&B',
+            'filters' => ['["tourism"~"^(hotel|guest_house|bed_and_breakfast|apartment)$"]'],
+        ],
+        'hairdresser' => ['label' => 'Kapper', 'filters' => ['["shop"="hairdresser"]']],
+        'beauty_salon' => [
+            'label' => 'Schoonheidssalon / nagelstudio',
+            'filters' => ['["shop"="beauty"]', '["shop"="nails"]', '["shop"="massage"]'],
+        ],
+        'bakery' => ['label' => 'Bakkerij', 'filters' => ['["shop"="bakery"]', '["shop"="pastry"]']],
+        'butcher' => ['label' => 'Slagerij', 'filters' => ['["shop"="butcher"]']],
+        'florist' => ['label' => 'Bloemist', 'filters' => ['["shop"="florist"]']],
+        'garage_car_repair' => [
+            'label' => 'Autogarage / autobedrijf',
+            'filters' => ['["shop"="car_repair"]', '["shop"="car"]', '["shop"="tyres"]'],
+        ],
+        'bicycle_shop' => ['label' => 'Fietsenmaker', 'filters' => ['["shop"="bicycle"]']],
+        'plumber' => ['label' => 'Loodgieter / installateur', 'filters' => ['["craft"="plumber"]', '["craft"="hvac"]']],
+        'electrician' => ['label' => 'Elektricien', 'filters' => ['["craft"="electrician"]']],
+        'carpenter' => [
+            'label' => 'Timmerman / aannemer',
+            'filters' => ['["craft"="carpenter"]', '["craft"="builder"]', '["craft"="joiner"]'],
+        ],
+        'painter' => ['label' => 'Schilder / stukadoor', 'filters' => ['["craft"="painter"]', '["craft"="plasterer"]']],
+        'gardener' => ['label' => 'Hovenier', 'filters' => ['["craft"="gardener"]', '["shop"="garden_centre"]']],
+        'cleaning' => ['label' => 'Schoonmaakbedrijf', 'filters' => ['["craft"="cleaning"]', '["shop"="laundry"]', '["shop"="dry_cleaning"]']],
+        'dentist' => ['label' => 'Tandarts', 'filters' => ['["amenity"="dentist"]', '["healthcare"="dentist"]']],
+        'doctor' => ['label' => 'Huisarts', 'filters' => ['["amenity"="doctors"]', '["healthcare"="doctor"]']],
+        'physiotherapist' => ['label' => 'Fysiotherapeut', 'filters' => ['["healthcare"="physiotherapist"]']],
+        'veterinary' => ['label' => 'Dierenarts', 'filters' => ['["amenity"="veterinary"]']],
+        'law_office' => ['label' => 'Advocaat / notaris', 'filters' => ['["office"="lawyer"]', '["office"="notary"]']],
+        'accountant' => [
+            'label' => 'Accountant / administratiekantoor',
+            'filters' => ['["office"="accountant"]', '["office"="tax_advisor"]', '["office"="financial"]'],
+        ],
+        'real_estate' => ['label' => 'Makelaar', 'filters' => ['["office"="estate_agent"]']],
+        'architect' => ['label' => 'Architect', 'filters' => ['["office"="architect"]']],
+        'insurance' => ['label' => 'Verzekeringen / financieel advies', 'filters' => ['["office"="insurance"]']],
+        'gym' => ['label' => 'Sportschool', 'filters' => ['["leisure"="fitness_centre"]', '["leisure"="sports_centre"]']],
+        'clothing_store' => ['label' => 'Kledingwinkel', 'filters' => ['["shop"="clothes"]', '["shop"="shoes"]']],
+        'furniture_store' => ['label' => 'Meubelzaak / interieur', 'filters' => ['["shop"="furniture"]', '["shop"="interior_decoration"]']],
+        'jewelry_optician' => ['label' => 'Juwelier / opticien', 'filters' => ['["shop"="jewelry"]', '["shop"="optician"]']],
+        'pet_shop' => ['label' => 'Dierenwinkel', 'filters' => ['["shop"="pet"]', '["shop"="pet_grooming"]']],
+        'driving_school' => ['label' => 'Rijschool', 'filters' => ['["amenity"="driving_school"]']],
+        'childcare' => ['label' => 'Kinderopvang', 'filters' => ['["amenity"="childcare"]', '["amenity"="kindergarten"]']],
     ];
+}
+
+/** Categories in the shape the frontend dropdown wants. */
+function categories_for_ui(): array
+{
+    $out = [];
+    foreach (categories() as $slug => $cat) {
+        $out[] = ['value' => $slug, 'label' => $cat['label']];
+    }
+    return $out;
 }
 
 /** Returns [south, west, north, east] bounding box for a NL place name. */
@@ -49,44 +125,111 @@ function geocode_city(string $city): array
         'limit' => 1,
         'countrycodes' => 'nl',
     ]);
-    $res = http_get(NOMINATIM_URL . '?' . $params, 15);
+    $res = http_get(nominatim_url() . '?' . $params, 15);
     if (!$res['ok'] || $res['status'] !== 200) {
-        throw new RuntimeException('Kon geen verbinding maken met Nominatim (geocoding): ' . ($res['error'] ?? "HTTP {$res['status']}"));
+        throw new RuntimeException(
+            'Kon geen verbinding maken met de OpenStreetMap-zoekdienst (Nominatim): '
+            . ($res['error'] ?: "HTTP {$res['status']}")
+            . '. Controleer of je hosting uitgaande internetverbindingen toestaat.'
+        );
     }
     $results = json_decode($res['body'], true);
     if (!is_array($results) || count($results) === 0) {
-        throw new RuntimeException("Kon plaats '{$city}' niet vinden in Nederland");
+        throw new RuntimeException(
+            "Plaats '{$city}' niet gevonden in Nederland. Controleer de spelling "
+            . '(gebruik de officiële plaatsnaam, bijvoorbeeld "Den Bosch" of "s-Hertogenbosch").'
+        );
     }
     $bbox = $results[0]['boundingbox']; // [south, north, west, east] as strings
     return [(float) $bbox[0], (float) $bbox[2], (float) $bbox[1], (float) $bbox[3]];
 }
 
-function build_overpass_query(array $bbox, array $tags): string
+function build_overpass_query(array $bbox, array $filters, int $limit): string
 {
     [$south, $west, $north, $east] = $bbox;
     $bboxStr = "{$south},{$west},{$north},{$east}";
     $clauses = [];
-    foreach ($tags as [$key, $value]) {
-        $clauses[] = "node[\"{$key}\"=\"{$value}\"][\"website\"]({$bboxStr});";
-        $clauses[] = "way[\"{$key}\"=\"{$value}\"][\"website\"]({$bboxStr});";
-        $clauses[] = "node[\"{$key}\"=\"{$value}\"][\"contact:website\"]({$bboxStr});";
-        $clauses[] = "way[\"{$key}\"=\"{$value}\"][\"contact:website\"]({$bboxStr});";
+    foreach ($filters as $filter) {
+        // nwr = node/way/relation in one go.
+        $clauses[] = "nwr{$filter}({$bboxStr});";
     }
     $body = implode("\n  ", $clauses);
-    return "[out:json][timeout:60];\n(\n  {$body}\n);\nout center 100;";
+    $outLimit = max(50, $limit * 4); // over-fetch: many results get filtered out below
+    return "[out:json][timeout:90];\n(\n  {$body}\n);\nout center {$outLimit};";
 }
 
+/** Queries Overpass, trying each mirror until one succeeds. */
+function overpass_query(string $query): array
+{
+    $errors = [];
+    foreach (overpass_endpoints() as $endpoint) {
+        $ch = curl_init();
+        curl_setopt_array($ch, [
+            CURLOPT_URL => $endpoint,
+            CURLOPT_POST => true,
+            CURLOPT_POSTFIELDS => http_build_query(['data' => $query]),
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_TIMEOUT => 90,
+            CURLOPT_CONNECTTIMEOUT => 10,
+            CURLOPT_USERAGENT => crawler_user_agent(),
+        ]);
+        $body = curl_exec($ch);
+        $status = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $curlError = curl_error($ch);
+        curl_close($ch);
+
+        if ($body !== false && $status === 200) {
+            $data = json_decode($body, true);
+            if (is_array($data) && isset($data['elements'])) {
+                return $data['elements'];
+            }
+            $errors[] = "{$endpoint}: ongeldig antwoord";
+            continue;
+        }
+        $errors[] = "{$endpoint}: " . ($curlError ?: "HTTP {$status}");
+    }
+
+    throw new RuntimeException(
+        'Alle OpenStreetMap-servers (Overpass) gaven een fout. Dit is meestal tijdelijk — '
+        . 'probeer het over een paar minuten opnieuw. Details: ' . implode(' | ', $errors)
+    );
+}
+
+/** Street + house number only; postcode and city are stored separately. */
 function address_from_tags(array $tags): string
 {
-    $street = trim(($tags['addr:street'] ?? '') . ' ' . ($tags['addr:housenumber'] ?? ''));
-    $line2 = trim(($tags['addr:postcode'] ?? '') . ' ' . ($tags['addr:city'] ?? ''));
-    return implode(', ', array_filter([$street, $line2]));
+    return trim(($tags['addr:street'] ?? '') . ' ' . ($tags['addr:housenumber'] ?? ''));
+}
+
+function normalize_website(string $website): string
+{
+    $website = trim($website);
+    if ($website === '') {
+        return '';
+    }
+    if (!preg_match('#^https?://#i', $website)) {
+        $website = 'https://' . ltrim($website, '/');
+    }
+    return $website;
+}
+
+/** Best human-readable description of what the OSM tags say this business is. */
+function business_type_from_tags(array $tags): string
+{
+    foreach (['shop', 'craft', 'office', 'amenity', 'healthcare', 'leisure', 'tourism'] as $key) {
+        if (!empty($tags[$key]) && $tags[$key] !== 'yes') {
+            return str_replace('_', ' ', $tags[$key]);
+        }
+    }
+    return '';
 }
 
 /**
- * Returns a list of ['name','website','city','category','address','phone','source','source_id'].
+ * Returns a list of business arrays ready for storage.
+ * $onlyWithoutWebsite: when true, only businesses that have no website
+ * at all are returned (the highest-value leads).
  */
-function discover_businesses(string $city, string $category, int $limit = 25): array
+function discover_businesses(string $city, string $category, int $limit = 25, bool $onlyWithoutWebsite = false): array
 {
     $cats = categories();
     if (!isset($cats[$category])) {
@@ -96,60 +239,67 @@ function discover_businesses(string $city, string $category, int $limit = 25): a
     $bbox = geocode_city($city);
     usleep(1_000_000); // be polite to Nominatim before hitting Overpass
 
-    $query = build_overpass_query($bbox, $cats[$category]);
-    $ch = curl_init();
-    curl_setopt_array($ch, [
-        CURLOPT_URL => OVERPASS_URL,
-        CURLOPT_POST => true,
-        CURLOPT_POSTFIELDS => http_build_query(['data' => $query]),
-        CURLOPT_RETURNTRANSFER => true,
-        CURLOPT_TIMEOUT => 60,
-        CURLOPT_USERAGENT => crawler_user_agent(),
-    ]);
-    $body = curl_exec($ch);
-    $status = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-    $curlError = curl_error($ch);
-    curl_close($ch);
-
-    if ($body === false || $status !== 200) {
-        throw new RuntimeException('Overpass-query mislukt: ' . ($curlError ?: "HTTP {$status}"));
-    }
-
-    $data = json_decode($body, true);
-    $elements = $data['elements'] ?? [];
+    $elements = overpass_query(build_overpass_query($bbox, $cats[$category]['filters'], $limit));
 
     $results = [];
-    $seen = [];
+    $seenWebsites = [];
+    $seenNames = [];
     foreach ($elements as $el) {
         $tags = $el['tags'] ?? [];
-        $website = trim($tags['website'] ?? ($tags['contact:website'] ?? ''));
         $name = trim($tags['name'] ?? '');
-        if ($website === '' || $name === '') {
+        if ($name === '') {
+            continue; // unnamed POIs are useless as leads
+        }
+
+        $website = normalize_website($tags['website'] ?? ($tags['contact:website'] ?? ($tags['url'] ?? '')));
+        $hasWebsite = $website !== '';
+
+        if ($onlyWithoutWebsite && $hasWebsite) {
             continue;
         }
-        if (!preg_match('#^https?://#i', $website)) {
-            $website = 'https://' . $website;
+
+        // De-duplicate: by website when there is one, otherwise by name+street.
+        if ($hasWebsite) {
+            $key = strtolower(rtrim($website, '/'));
+            if (isset($seenWebsites[$key])) {
+                continue;
+            }
+            $seenWebsites[$key] = true;
+        } else {
+            $key = strtolower($name . '|' . ($tags['addr:street'] ?? '') . ($tags['addr:housenumber'] ?? ''));
+            if (isset($seenNames[$key])) {
+                continue;
+            }
+            $seenNames[$key] = true;
         }
-        $normalized = strtolower(rtrim($website, '/'));
-        if (isset($seen[$normalized])) {
-            continue;
-        }
-        $seen[$normalized] = true;
 
         $results[] = [
             'name' => $name,
             'website' => $website,
-            'city' => $city,
+            'has_website' => $hasWebsite,
+            'city' => trim($tags['addr:city'] ?? '') !== '' ? $tags['addr:city'] : $city,
             'category' => $category,
+            'business_type' => business_type_from_tags($tags),
             'address' => address_from_tags($tags),
-            'phone' => $tags['phone'] ?? ($tags['contact:phone'] ?? ''),
+            'postcode' => $tags['addr:postcode'] ?? '',
+            'phone' => $tags['phone'] ?? ($tags['contact:phone'] ?? ($tags['contact:mobile'] ?? '')),
+            'email' => $tags['email'] ?? ($tags['contact:email'] ?? ''),
+            'opening_hours' => $tags['opening_hours'] ?? '',
+            'facebook' => $tags['contact:facebook'] ?? ($tags['facebook'] ?? ''),
+            'instagram' => $tags['contact:instagram'] ?? ($tags['instagram'] ?? ''),
+            'lat' => $el['lat'] ?? ($el['center']['lat'] ?? null),
+            'lon' => $el['lon'] ?? ($el['center']['lon'] ?? null),
             'source' => 'osm',
             'source_id' => ($el['type'] ?? '') . '/' . ($el['id'] ?? ''),
         ];
+
         if (count($results) >= $limit) {
             break;
         }
     }
+
+    // Businesses without a website first — they are the strongest leads.
+    usort($results, fn($a, $b) => ($a['has_website'] ? 1 : 0) <=> ($b['has_website'] ? 1 : 0));
 
     return $results;
 }

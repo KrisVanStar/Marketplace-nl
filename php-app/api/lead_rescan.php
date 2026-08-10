@@ -15,21 +15,18 @@ if ($id === 0) {
 }
 
 $pdo = db();
-$stmt = $pdo->prepare('SELECT * FROM businesses WHERE id = ?');
-$stmt->execute([$id]);
-$business = $stmt->fetch();
+$business = find_business($pdo, $id);
 if (!$business) {
     json_error('Lead not found', 404);
 }
 
-scan_and_store($pdo, $id, $business['website']);
+scan_and_store($pdo, $id, $business);
 
-$stmt = $pdo->prepare(
-    "SELECT b.*, s.score AS latest_score, s.priority AS latest_priority,
-            s.reasons_json AS latest_reasons_json, s.scanned_at AS scanned_at
-     FROM businesses b
-     LEFT JOIN scans s ON s.id = (SELECT id FROM scans WHERE business_id = b.id ORDER BY id DESC LIMIT 1)
-     WHERE b.id = ?"
-);
-$stmt->execute([$id]);
-json_response(lead_row_to_array($stmt->fetch()));
+$scan = latest_scan_for($pdo, $id);
+json_response(lead_row_to_array(array_merge($business, [
+    'latest_score' => $scan['score'] ?? null,
+    'latest_priority' => $scan['priority'] ?? null,
+    'latest_summary' => $scan['summary'] ?? null,
+    'latest_reasons_json' => $scan['reasons_json'] ?? null,
+    'scanned_at' => $scan['scanned_at'] ?? null,
+])));

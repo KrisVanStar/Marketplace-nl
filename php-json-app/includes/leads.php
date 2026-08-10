@@ -3,7 +3,8 @@ declare(strict_types=1);
 
 /**
  * Fetches businesses joined with their most recent scan, with optional
- * filters. $filters keys: city, category, status, min_score, sort, limit.
+ * filters. $filters keys: city, category, status, min_score, priority,
+ * only_without_website, sort, limit.
  */
 function fetch_leads(array $filters = []): array
 {
@@ -20,11 +21,14 @@ function fetch_leads(array $filters = []): array
     $city = $filters['city'] ?? '';
     $category = $filters['category'] ?? '';
     $status = $filters['status'] ?? '';
+    $priority = $filters['priority'] ?? '';
     $minScore = $filters['min_score'] ?? null;
+    $onlyNoWebsite = !empty($filters['only_without_website']);
 
     $rows = [];
     foreach ($data['businesses'] as $b) {
-        if ($city !== '' && stripos($b['city'], $city) === false) {
+        $b = array_merge(business_defaults(), $b);
+        if ($city !== '' && stripos((string) $b['city'], $city) === false) {
             continue;
         }
         if ($category !== '' && $b['category'] !== $category) {
@@ -33,8 +37,14 @@ function fetch_leads(array $filters = []): array
         if ($status !== '' && $b['status'] !== $status) {
             continue;
         }
+        if ($onlyNoWebsite && trim((string) $b['website']) !== '') {
+            continue;
+        }
         $scan = $latestByBusiness[(int) $b['id']] ?? null;
         if (!empty($minScore) && (!$scan || $scan['score'] < (int) $minScore)) {
+            continue;
+        }
+        if ($priority !== '' && (!$scan || $scan['priority'] !== $priority)) {
             continue;
         }
         $rows[] = lead_row_to_array($b, $scan);
@@ -46,7 +56,10 @@ function fetch_leads(array $filters = []): array
             return ($a['latest_score'] ?? -1) <=> ($b['latest_score'] ?? -1);
         }
         if ($sort === 'newest') {
-            return strcmp($b['created_at'], $a['created_at']);
+            return strcmp((string) $b['created_at'], (string) $a['created_at']);
+        }
+        if ($sort === 'name') {
+            return strcasecmp((string) $a['name'], (string) $b['name']);
         }
         return ($b['latest_score'] ?? -1) <=> ($a['latest_score'] ?? -1);
     });
@@ -57,18 +70,32 @@ function fetch_leads(array $filters = []): array
 
 function lead_row_to_array(array $business, ?array $scan): array
 {
+    $business = array_merge(business_defaults(), $business);
     return [
         'id' => (int) $business['id'],
         'name' => $business['name'],
         'website' => $business['website'],
+        'has_website' => trim((string) $business['website']) !== '',
         'city' => $business['city'],
         'category' => $business['category'],
+        'business_type' => $business['business_type'],
         'address' => $business['address'],
+        'postcode' => $business['postcode'],
         'phone' => $business['phone'],
+        'email' => $business['email'],
+        'opening_hours' => $business['opening_hours'],
+        'facebook' => $business['facebook'],
+        'instagram' => $business['instagram'],
+        'lat' => $business['lat'],
+        'lon' => $business['lon'],
+        'source' => $business['source'],
+        'source_id' => $business['source_id'],
         'status' => $business['status'],
+        'notes' => $business['notes'] ?? '',
         'created_at' => $business['created_at'],
         'latest_score' => $scan['score'] ?? null,
         'latest_priority' => $scan['priority'] ?? null,
+        'latest_summary' => $scan['summary'] ?? null,
         'latest_reasons' => $scan['reasons'] ?? [],
         'scanned_at' => $scan['scanned_at'] ?? null,
     ];

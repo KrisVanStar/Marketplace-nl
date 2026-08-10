@@ -1,31 +1,58 @@
 <?php
 declare(strict_types=1);
 
+/** Fields a business record carries, with their defaults. */
+function business_defaults(): array
+{
+    return [
+        'name' => '',
+        'website' => '',
+        'has_website' => false,
+        'city' => '',
+        'category' => '',
+        'business_type' => '',
+        'address' => '',
+        'postcode' => '',
+        'phone' => '',
+        'email' => '',
+        'opening_hours' => '',
+        'facebook' => '',
+        'instagram' => '',
+        'lat' => null,
+        'lon' => null,
+        'source' => 'manual',
+        'source_id' => null,
+        'notes' => '',
+    ];
+}
+
 function get_or_create_business(array $b): int
 {
+    $b = array_merge(business_defaults(), array_intersect_key($b, business_defaults()));
+    $b['has_website'] = trim((string) $b['website']) !== '';
+
     $id = null;
     jsondb_transaction(function (array $data) use ($b, &$id) {
-        $normalized = strtolower(rtrim($b['website'], '/'));
+        // Match on website when there is one, otherwise on name + address.
         foreach ($data['businesses'] as $existing) {
-            if (strtolower(rtrim($existing['website'], '/')) === $normalized) {
+            $sameSite = $b['has_website']
+                && !empty($existing['website'])
+                && strtolower(rtrim($existing['website'], '/')) === strtolower(rtrim($b['website'], '/'));
+            $sameNameAddress = !$b['has_website']
+                && empty($existing['website'])
+                && strcasecmp($existing['name'], $b['name']) === 0
+                && strcasecmp((string) ($existing['address'] ?? ''), (string) $b['address']) === 0;
+            if ($sameSite || $sameNameAddress) {
                 $id = (int) $existing['id'];
                 return $data;
             }
         }
         $id = jsondb_next_id($data['businesses']);
-        $data['businesses'][] = [
+        $data['businesses'][] = array_merge($b, [
             'id' => $id,
-            'name' => $b['name'],
-            'website' => $b['website'],
-            'city' => $b['city'] ?? '',
-            'category' => $b['category'] ?? '',
-            'address' => $b['address'] ?? '',
-            'phone' => $b['phone'] ?? '',
-            'source' => $b['source'] ?? 'manual',
-            'source_id' => $b['source_id'] ?? null,
             'status' => 'new',
             'created_at' => date('c'),
-        ];
+        ]);
         return $data;
     });
     return $id;
@@ -35,7 +62,7 @@ function find_business(int $id): ?array
 {
     foreach (jsondb_read()['businesses'] as $b) {
         if ((int) $b['id'] === $id) {
-            return $b;
+            return array_merge(business_defaults(), $b);
         }
     }
     return null;
@@ -55,11 +82,28 @@ function latest_scan_for(int $businessId): ?array
     return $best;
 }
 
-/** Scans one business's website (slow network call, done outside any lock) and stores the resulting scan. */
-function scan_and_store(int $businessId, string $website): array
+/**
+ * Runs the right analysis for a business: a real scan when it has a
+ * website, or the "no website at all" verdict when it doesn't.
+ * Returns ['signals' => array, 'result' => array].
+ */
+function evaluate_business(array $business): array
 {
+    $website = trim((string) ($business['website'] ?? ''));
+    if ($website === '') {
+        return [
+            'signals' => ['no_website' => true, 'reachable' => false],
+            'result' => score_no_website(),
+        ];
+    }
     $signals = analyze_website($website);
-    $result = score_site($signals);
+    return ['signals' => $signals, 'result' => score_site($signals)];
+}
+
+/** Scans one business (slow network calls happen outside any lock) and stores the scan. */
+function scan_and_store(int $businessId, array $business): array
+{
+    ['signals' => $signals, 'result' => $result] = evaluate_business($business);
 
     jsondb_transaction(function (array $data) use ($businessId, $signals, $result) {
         $data['scans'][] = [
@@ -67,14 +111,15 @@ function scan_and_store(int $businessId, string $website): array
             'business_id' => $businessId,
             'score' => $result['score'],
             'priority' => $result['priority'],
+            'summary' => $result['summary'],
             'reasons' => $result['reasons'],
+            'findings' => $result['findings'],
+            'positives' => $result['positives'],
             'signals' => $signals,
-            'is_https' => !empty($signals['is_https']),
-            'has_viewport' => !empty($signals['has_viewport_meta']),
-            'status_code' => $signals['status_code'],
-            'final_url' => $signals['final_url'] ?: null,
-            'response_time_ms' => $signals['response_time_ms'],
-            'error' => $signals['error'] !== '' ? $signals['error'] : null,
+            'status_code' => $signals['status_code'] ?? null,
+            'final_url' => ($signals['final_url'] ?? '') ?: null,
+            'response_time_ms' => $signals['response_time_ms'] ?? null,
+            'error' => !empty($signals['error']) ? $signals['error'] : null,
             'scanned_at' => date('c'),
         ];
         return $data;
@@ -169,7 +214,7 @@ function process_queue_batch(?string $jobId = null, int $limit = 5): int
 
     $businessesById = [];
     foreach (jsondb_read()['businesses'] as $b) {
-        $businessesById[(int) $b['id']] = $b;
+        $businessesById[(int) $b['id']] = array_merge(business_defaults(), $b);
     }
 
     $deltaByJob = []; // job_id => [processed, found_leads]
@@ -178,8 +223,8 @@ function process_queue_batch(?string $jobId = null, int $limit = 5): int
         $isLead = 0;
         if ($business !== null) {
             try {
-                $result = scan_and_store((int) $item['business_id'], $business['website']);
-                $isLead = in_array($result['priority'], ['high', 'medium'], true) ? 1 : 0;
+                $result = scan_and_store((int) $item['business_id'], $business);
+                $isLead = in_array($result['priority'], ['high', 'medium', 'no_website'], true) ? 1 : 0;
             } catch (Throwable $e) {
                 $isLead = 0;
             }
@@ -204,7 +249,7 @@ function process_queue_batch(?string $jobId = null, int $limit = 5): int
             $remaining = array_filter($data['scan_queue'], fn($q) => $q['job_id'] === $job['id']);
             if (empty($remaining) && $job['status'] !== 'done') {
                 $job['status'] = 'done';
-                $job['message'] = "Klaar: {$job['processed']}/{$job['total']} sites gescand, {$job['found_leads']} kansrijke leads.";
+                $job['message'] = "Klaar: {$job['processed']} van {$job['total']} bedrijven geanalyseerd, {$job['found_leads']} kansrijke leads.";
             }
         }
         unset($job);

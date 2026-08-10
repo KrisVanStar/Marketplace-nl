@@ -1,38 +1,54 @@
 <?php
 declare(strict_types=1);
 require_once __DIR__ . '/../includes/bootstrap.php';
+require_once __DIR__ . '/../includes/tasks.php';
 require_once __DIR__ . '/../includes/leads.php';
 
 require_method('GET');
 
-$filters = [
+$leads = fetch_leads([
     'city' => trim((string) ($_GET['city'] ?? '')),
     'category' => trim((string) ($_GET['category'] ?? '')),
     'status' => trim((string) ($_GET['status'] ?? '')),
+    'priority' => trim((string) ($_GET['priority'] ?? '')),
     'min_score' => $_GET['min_score'] ?? null,
+    'only_without_website' => !empty($_GET['only_without_website']),
     'sort' => 'score_desc',
     'limit' => 1000,
-];
-
-$leads = fetch_leads($filters);
+]);
 
 header('Content-Type: text/csv; charset=utf-8');
 header('Content-Disposition: attachment; filename=leads.csv');
 
 $out = fopen('php://output', 'w');
-fputcsv($out, ['name', 'website', 'city', 'category', 'address', 'phone', 'status', 'score', 'priority', 'reasons']);
+fwrite($out, "\xEF\xBB\xBF"); // BOM so Excel opens UTF-8 correctly
+fputcsv($out, [
+    'bedrijf', 'website', 'heeft_website', 'adres', 'postcode', 'plaats', 'telefoon', 'email',
+    'openingstijden', 'categorie', 'status', 'score', 'prioriteit', 'samenvatting',
+    'problemen', 'aanbevelingen', 'notities',
+]);
+
 foreach ($leads as $lead) {
+    $scan = latest_scan_for((int) $lead['id']);
+    $findings = $scan['findings'] ?? [];
     fputcsv($out, [
         $lead['name'],
         $lead['website'],
-        $lead['city'],
-        $lead['category'],
+        $lead['has_website'] ? 'ja' : 'nee',
         $lead['address'],
+        $lead['postcode'],
+        $lead['city'],
         $lead['phone'],
+        $lead['email'],
+        $lead['opening_hours'],
+        $lead['category'],
         $lead['status'],
         $lead['latest_score'],
         $lead['latest_priority'],
-        implode('; ', $lead['latest_reasons']),
+        $lead['latest_summary'],
+        implode(' | ', array_column($findings, 'title')),
+        implode(' | ', array_column($findings, 'recommendation')),
+        $lead['notes'],
     ]);
 }
 fclose($out);

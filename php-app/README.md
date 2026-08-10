@@ -1,103 +1,103 @@
-# Marketplace-NL — Lead Scanner (PHP / MySQL, voor gewone webhosting)
+# Marketplace-NL — Lead Scanner (PHP + MySQL)
 
-Dit is de PHP + MySQL-versie van de app, gebouwd om te draaien op gewone
-("shared") webhosting zoals TransIP WebHosting — dus géén VPS, géén SSH
-nodig, géén Python. Werkt met alleen wat vrijwel elke PHP-hosting standaard
-biedt: PHP 8.x, een MySQL/MariaDB-database, en cronjobs.
+Vindt kleine bedrijven in Nederland met een verouderde website — of helemaal
+geen website — en levert per bedrijf een volledig rapport: wie het bedrijf is,
+wat er mis is met de site, en wat die site nodig heeft.
 
-Functioneel is dit dezelfde app als de Python-versie in `../python-app`:
-zoekt bedrijven in een Nederlandse plaats via OpenStreetMap, analyseert hun
-website op verouderingssignalen, en toont een gefilterde/sorteerbare
-leads-lijst met score en uitleg.
+Deze versie draait op gewone ("shared") webhosting zoals TransIP WebHosting:
+PHP 8, een MySQL-database en een cronjob. Wil je liever helemaal geen
+database, gebruik dan `../php-json-app` — functioneel identiek, maar met een
+JSON-bestand als opslag.
 
-## Belangrijk verschil met de Python-versie: achtergrondtaken via cron
+## Wat de app doet
 
-Shared hosting staat geen continu draaiend achtergrondproces toe (zoals de
-Python-versie met threads doet). In plaats daarvan zet deze versie
-openstaande scans in een wachtrij (`scan_queue`-tabel in de database), en
-verwerkt een `cron_worker.php`-script die wachtrij in kleine batches — die
-moet je zelf als cronjob inplannen (zie hieronder). Bij het starten van een
-scan wordt meteen een eerste kleine batch synchroon verwerkt, zodat je
-direct wat resultaten ziet; de rest komt binnen zodra de cron draait
-(meestal binnen een paar minuten, afhankelijk van hoe vaak je 'm laat
-draaien).
+1. **Zoeken.** Kies een plaats en een branche. De app zoekt bedrijven in
+   OpenStreetMap. Bedrijven **zonder** website worden bewust meegenomen en
+   bovenaan gezet — dat zijn de sterkste leads.
+2. **Analyseren.** Elke website wordt opgehaald en doorgemeten op zo'n
+   dertig punten: beveiliging, mobielvriendelijkheid, CMS en versie,
+   snelheid, vindbaarheid (SEO), toegankelijkheid, conversie en actualiteit.
+3. **Rapporteren.** Per bedrijf krijg je bedrijfsgegevens (adres, telefoon,
+   e-mail, openingstijden, sociale media, kaartlink), technische
+   websitegegevens, een lijst met **wat er mis is** (met ernst en uitleg),
+   bij elk punt **wat er nodig is** als concrete aanbeveling, en een lijst
+   met **wat al goed is**.
 
 ## Installatie op TransIP (of vergelijkbare shared hosting)
 
 1. **Database aanmaken.** Maak in je hostingpaneel een MySQL-database aan
-   (en een gebruiker met rechten daarop). Noteer host, databasenaam,
-   gebruikersnaam en wachtwoord.
-   TransIP's paneel noemt dit onderdeel doorgaans "MySQL databases" — als
-   je het niet direct terugvindt, check de TransIP-documentatie/support,
-   want de precieze indeling verschilt per hostingpakket.
-2. **Schema importeren.** Open phpMyAdmin (of het databasebeheer dat je
-   hostingpakket meelevert) voor die database en importeer `schema.sql`
-   uit deze map.
-3. **Bestanden uploaden.** Upload de hele inhoud van deze map (`php-app/`)
-   via FTP/SFTP naar de webroot van je domein (vaak `public_html/` of
-   `htdocs/`). Upload **niet** de map `python-app/` — die is niet nodig.
-4. **Configureren.** Kopieer `config.sample.php` naar `config.php` op de
-   server en vul in: databasegegevens, een contact-e-mailadres (wordt in
-   de User-Agent van de crawler gezet), en een willekeurig `cron_token`
-   (genereer er een met `php -r "echo bin2hex(random_bytes(16));"` of een
-   willekeurige lange string).
-5. **Cronjob instellen.** In je hostingpaneel (zoek naar "Cron jobs" /
-   "Geplande taken") zet je een taak die elke 1–5 minuten draait. Twee
-   opties, afhankelijk van wat je hosting ondersteunt:
-   - **Als CLI-cron beschikbaar is** (commando-gebaseerd):
-     `php /pad/naar/public_html/cron_worker.php`
-   - **Als alleen URL-gebaseerde cron beschikbaar is:**
-     `https://jouwdomein.nl/cron_worker.php?token=JOUW_CRON_TOKEN`
-     (gebruik hier exact de waarde die je in `config.php` bij
-     `cron_token` hebt gezet — zonder geldig token weigert het script).
-6. **Testen.** Open `https://jouwdomein.nl/` in je browser (ook prima
-   vanaf je telefoon) en start een scan.
+   met een gebruiker. Noteer host, databasenaam, gebruikersnaam en wachtwoord.
+2. **Schema importeren.** Open phpMyAdmin voor die database en importeer
+   `schema.sql` uit deze map.
+   *Had je al een oudere versie draaien met data erin?* Importeer dan
+   `migrate.sql` in plaats daarvan — dat voegt de nieuwe kolommen toe zonder
+   je bestaande leads te wissen.
+3. **Bestanden uploaden.** Upload de inhoud van deze map (`php-app/`) via
+   FTP/SFTP naar de webroot van je domein (vaak `public_html/`). Een submap
+   mag ook: de app gebruikt relatieve paden.
+4. **Configureren.** Kopieer `config.sample.php` naar `config.php` en vul
+   de databasegegevens in, plus een contact-e-mailadres en een willekeurig
+   `cron_token` (`php -r "echo bin2hex(random_bytes(16));"`).
+5. **Cronjob instellen.** Een taak die elke 1–5 minuten draait:
+   - **CLI-cron:** `php /pad/naar/public_html/cron_worker.php`
+   - **URL-cron:** `https://jouwdomein.nl/cron_worker.php?token=JOUW_CRON_TOKEN`
+6. **Testen.** Open `https://jouwdomein.nl/` en start een zoekopdracht.
 
-## Gebruik
+## Achtergrondtaken via cron
 
-Zelfde als de Python-versie:
-- **Scan starten**: kies stad + categorie (kapper, restaurant, loodgieter,
-  advocaat, ...), de app zoekt bedrijven via OpenStreetMap en analyseert
-  hun websites.
-- **CSV importeren**: eigen lijst met bedrijven uploaden (`name, website`
-  verplicht; `city, category, address, phone` optioneel).
-- **Leads-tabel**: filteren op stad/categorie/status/score, status
-  bijwerken, opnieuw scannen, exporteren naar CSV.
+Shared hosting staat geen continu draaiend achtergrondproces toe. Openstaande
+analyses gaan daarom in een wachtrij (`scan_queue`), die `cron_worker.php` in
+kleine batches afwerkt. Bij het starten van een zoekopdracht wordt meteen een
+eerste batch verwerkt zodat je direct resultaten ziet; de rest volgt zodra de
+cron draait.
 
-Zie ook de sectie "Hoe de score werkt" en "Belangrijk: verantwoord
-gebruik" in `../python-app/README.md` — die scoringlogica en de
-ethische/AVG-overwegingen zijn identiek in deze versie.
+## Weinig of geen resultaten?
+
+De bedrijvengegevens komen uit OpenStreetMap, en dat is vrijwilligerswerk:
+niet elk bedrijf staat erin, en lang niet elk bedrijf is onder de juiste
+branche vastgelegd. Kies dan de branche **"Alle bedrijven (breedste
+zoekopdracht)"**, probeer een grotere plaats, of controleer de plaatsnaam.
+Ambachtelijke branches (loodgieter, elektricien, schilder) zijn in OSM het
+dunst gevuld; horeca en winkels het best.
+
+## Hoe de score werkt
+
+Elk gevonden probleem levert punten op; opgeteld geeft dat een score van
+0 tot 100. Bedrijven zonder website krijgen 100 en de aparte prioriteit
+"Geen website". Zwaarst wegen: geen HTTPS (25), niet mobielvriendelijk (20),
+Flash (20), verouderd CMS (15) en een lage Google PageSpeed-score (15).
+Vanaf 55 punten is het "hoge prioriteit", vanaf 30 "gemiddeld".
+
+Optioneel: zet een gratis
+[PageSpeed Insights API-key](https://developers.google.com/speed/docs/insights/v5/get-started)
+in `config.php` voor een echte snelheidsscore van Google.
+
+## Verantwoord gebruik
+
+- De crawler respecteert `robots.txt`, gebruikt een herkenbare User-Agent
+  met contactgegevens en bezoekt alleen de startpagina van elke site.
+- Nominatim en Overpass zijn gratis vrijwilligersdiensten met een
+  [fair-use-beleid](https://operations.osmfoundation.org/policies/nominatim/).
+- De verzamelde gegevens zijn zakelijke, openbare gegevens bedoeld voor
+  B2B-benadering. Houd je aan de AVG: vermeld wie je bent, bied een
+  afmeldmogelijkheid, bewaar niet langer dan nodig.
+- De score is een signaal, geen oordeel: controleer een site altijd zelf.
 
 ## Projectstructuur
 
 ```
 index.html, app.js, style.css   Dashboard-frontend (geen build-stap nodig)
 config.sample.php               Kopieer naar config.php en vul in (niet in git)
-schema.sql                      MySQL-schema, eenmalig importeren
-cron_worker.php                 Verwerkt de scan-wachtrij in batches
+schema.sql                      MySQL-schema voor een nieuwe installatie
+migrate.sql                     Kolommen toevoegen aan een bestaande installatie
+cron_worker.php                 Verwerkt de analyse-wachtrij in batches
 includes/
-  bootstrap.php, helpers.php    Config/DB-verbinding, JSON-helpers, cURL-wrapper
-  discovery.php                 OpenStreetMap-bedrijvenzoekopdracht
-  analyzer.php                  Haalt een website op en extraheert veroudering-signalen
-  scoring.php                   Zet signalen om in score + leesbare redenen
+  bootstrap.php, helpers.php    Config/DB-verbinding, JSON-responses, cURL
+  discovery.php                 OpenStreetMap-zoekopdracht + branches
+  analyzer.php                  Meet een website door op ~30 signalen
+  scoring.php                   Vertaalt signalen naar problemen + aanbevelingen
   tasks.php                     Wachtrijverwerking, gedeeld door API en cron
   leads.php                     Leads ophalen/filteren
-api/
-  categories.php, scan_discover.php, scan_status.php, leads.php,
-  lead_detail.php, lead_update.php, lead_rescan.php, leads_import.php,
-  export_csv.php                REST-achtige JSON-endpoints
-.htaccess                       Blokkeert directe toegang tot config.php/includes/
+api/                            JSON-endpoints voor de frontend
+.htaccess                       Blokkeert toegang tot config.php en includes/
 ```
-
-## Lokaal testen (optioneel)
-
-Met PHP's ingebouwde server en een lokale MySQL-server:
-
-```bash
-php -S localhost:8000
-```
-
-Zorg dat `config.php` naar een lokale database wijst waarin je
-`schema.sql` hebt geïmporteerd. Voor de wachtrij kun je `cron_worker.php`
-handmatig herhaaldelijk aanroepen (`php cron_worker.php` op de CLI, dat
-werkt zonder token) in plaats van een echte cronjob in te stellen.

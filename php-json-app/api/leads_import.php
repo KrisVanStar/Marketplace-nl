@@ -1,6 +1,7 @@
 <?php
 declare(strict_types=1);
 require_once __DIR__ . '/../includes/bootstrap.php';
+require_once __DIR__ . '/../includes/discovery.php';
 require_once __DIR__ . '/../includes/analyzer.php';
 require_once __DIR__ . '/../includes/scoring.php';
 require_once __DIR__ . '/../includes/tasks.php';
@@ -8,15 +9,14 @@ require_once __DIR__ . '/../includes/tasks.php';
 require_method('POST');
 
 if (!isset($_FILES['file']) || $_FILES['file']['error'] !== UPLOAD_ERR_OK) {
-    json_error('No file uploaded');
+    json_error('Geen bestand ontvangen');
 }
 
 $handle = fopen($_FILES['file']['tmp_name'], 'r');
 if ($handle === false) {
-    json_error('Could not read uploaded file');
+    json_error('Kon het bestand niet lezen');
 }
 
-// Strip a UTF-8 BOM if present.
 $bom = fread($handle, 3);
 if ($bom !== "\xEF\xBB\xBF") {
     rewind($handle);
@@ -24,12 +24,12 @@ if ($bom !== "\xEF\xBB\xBF") {
 
 $header = fgetcsv($handle);
 if ($header === false) {
-    json_error('CSV file is empty');
+    json_error('Het CSV-bestand is leeg');
 }
 $header = array_map(fn($h) => strtolower(trim((string) $h)), $header);
 
 $jobId = uuidv4();
-create_job($jobId, 'CSV import', 'manual');
+create_job($jobId, 'CSV-import', 'manual');
 update_job($jobId, ['status' => 'running']);
 
 $count = 0;
@@ -39,24 +39,21 @@ while (($row = fgetcsv($handle)) !== false) {
     if ($assoc === false) {
         continue;
     }
-    $name = trim((string) ($assoc['name'] ?? ''));
-    $website = trim((string) ($assoc['website'] ?? ''));
-    if ($name === '' || $website === '') {
-        continue;
-    }
-    if (!preg_match('#^https?://#i', $website)) {
-        $website = 'https://' . $website;
+    $name = trim((string) ($assoc['name'] ?? ($assoc['bedrijf'] ?? '')));
+    if ($name === '') {
+        continue; // a name is the only hard requirement; website may be empty
     }
 
     $businessId = get_or_create_business([
         'name' => $name,
-        'website' => $website,
-        'city' => trim((string) ($assoc['city'] ?? '')),
-        'category' => trim((string) ($assoc['category'] ?? '')) ?: 'manual',
-        'address' => trim((string) ($assoc['address'] ?? '')),
-        'phone' => trim((string) ($assoc['phone'] ?? '')),
+        'website' => normalize_website((string) ($assoc['website'] ?? '')),
+        'city' => trim((string) ($assoc['city'] ?? ($assoc['plaats'] ?? ''))),
+        'category' => trim((string) ($assoc['category'] ?? ($assoc['categorie'] ?? ''))) ?: 'manual',
+        'address' => trim((string) ($assoc['address'] ?? ($assoc['adres'] ?? ''))),
+        'postcode' => trim((string) ($assoc['postcode'] ?? '')),
+        'phone' => trim((string) ($assoc['phone'] ?? ($assoc['telefoon'] ?? ''))),
+        'email' => trim((string) ($assoc['email'] ?? '')),
         'source' => 'csv',
-        'source_id' => null,
     ]);
     enqueue_business($jobId, $businessId);
     $businessIds[] = $businessId;
@@ -67,7 +64,10 @@ fclose($handle);
 update_job($jobId, ['total' => $count]);
 
 if ($count === 0) {
-    update_job($jobId, ['status' => 'done', 'message' => 'Geen geldige rijen gevonden (kolommen name en website zijn verplicht).']);
+    update_job($jobId, [
+        'status' => 'done',
+        'message' => 'Geen geldige rijen gevonden. Verplichte kolom: name (of bedrijf).',
+    ]);
 } else {
     process_queue_batch($jobId, 8);
 }
