@@ -1,0 +1,13 @@
+Options -Indexes
+DirectoryIndex index.html
+
+# Block direct access to files that should never be requested by a browser.
+<FilesMatch "^(config\.php|config\.sample\.php)$">
+  Require all denied
+</FilesMatch>
+
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  RewriteRule ^includes/ - [F,L]
+  RewriteRule ^data/ - [F,L]
+</IfModule>

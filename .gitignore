@@ -7,3 +7,5 @@ venv/
 .env
 .DS_Store
 php-app/config.php
+php-json-app/config.php
+php-json-app/data/db.json
