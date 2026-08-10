@@ -6,3 +6,4 @@ venv/
 *.db-journal
 .env
 .DS_Store
+php-app/config.php
