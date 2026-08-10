@@ -11,32 +11,24 @@ geen website — en levert per bedrijf een verkoopklaar rapport:
 Bedrijven zonder website worden meegenomen en bovenaan gezet: dat zijn de
 sterkste leads.
 
-## Welke versie moet ik hebben?
+De app staat in **[`php-json-app/`](php-json-app/)** en draait op gewone
+webhosting (zoals TransIP): alleen PHP 8 en een cronjob nodig, geen database —
+alle gegevens staan in één JSON-bestand dat de app zelf beheert.
 
-| Map | Techniek | Kies dit als... |
-|---|---|---|
-| [`php-json-app/`](php-json-app/) | PHP, opslag in een JSON-bestand | Je gewone webhosting hebt (TransIP e.d.) en geen database wilt aanmaken. **Eenvoudigste installatie.** |
-| [`php-app/`](php-app/) | PHP + MySQL | Je gewone webhosting hebt met een MySQL-database, en veel leads verwacht. |
-| [`python-app/`](python-app/) | FastAPI + SQLite | Je een VPS of cloudhosting hebt waar een Python-proces mag blijven draaien. |
+## Aan de slag
 
-De twee PHP-versies zijn functioneel identiek en delen dezelfde analyse- en
-scoringlogica; alleen de opslaglaag verschilt. Elke map heeft een eigen
-README met installatie-instructies.
+Zie **[php-json-app/README.md](php-json-app/README.md)** voor de volledige
+installatie-instructies. In het kort:
 
-> **Let op:** `python-app/` is de oorspronkelijke, eenvoudigere versie. Die
-> heeft de uitgebreide analyse (aanbevelingen per probleem, bedrijven zonder
-> website, ~30 signalen) nog niet — die zit alleen in de PHP-versies.
+1. Upload de inhoud van `php-json-app/` naar je webruimte.
+2. Kopieer `config.sample.php` naar `config.php` en vul je gegevens in.
+3. Open `check.php` in je browser — die controleert de hele installatie en
+   zegt per punt wat er nog moet gebeuren.
+4. Stel de cronjob in en begin met zoeken via `index.html`.
 
-## Hoe het werkt
+## Werkt er iets niet?
 
-1. **Zoeken** — je kiest een plaats en een branche; de app zoekt bedrijven
-   via OpenStreetMap (gratis, geen API-key nodig).
-2. **Analyseren** — elke website wordt opgehaald en doorgemeten op zo'n
-   dertig punten.
-3. **Beoordelen** — de signalen worden vertaald naar een score van 0–100,
-   een lijst problemen en een lijst aanbevelingen.
-4. **Opvolgen** — filter op plaats, branche, prioriteit of status, zet leads
-   op "benaderd"/"gewonnen", schrijf notities en exporteer alles naar CSV.
-
-Zie de README in de map van je keuze voor installatie, de scoreberekening en
-de richtlijnen voor verantwoord (AVG-conform) gebruik.
+Open **`check.php`** op je server (bijvoorbeeld
+`https://jouwdomein.nl/check.php`). Die controleert PHP-versie en extensies,
+of `config.php` klopt, of de map `data/` beschrijfbaar is, en of je hosting
+OpenStreetMap kan bereiken — met per probleem de oplossing erbij.

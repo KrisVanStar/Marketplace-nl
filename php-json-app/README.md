@@ -58,8 +58,38 @@ phpMyAdmin, geen extra configuratie daarvoor.
    "Geplande taken") zet je een taak die elke 1–5 minuten draait:
    - **CLI-cron:** `php /pad/naar/public_html/cron_worker.php`
    - **URL-cron:** `https://jouwdomein.nl/cron_worker.php?token=JOUW_CRON_TOKEN`
-5. **Testen.** Open `https://jouwdomein.nl/` (ook prima vanaf je telefoon)
-   en start een zoekopdracht.
+5. **Controleren.** Open `https://jouwdomein.nl/check.php`. Die pagina test
+   de hele installatie — PHP-versie, extensies, `config.php`, schrijfrechten
+   en de verbinding met OpenStreetMap — en zet bij elk probleem meteen de
+   oplossing. Alles groen? Dan is de app klaar voor gebruik.
+6. **Aan de slag.** Open `https://jouwdomein.nl/` (ook prima vanaf je
+   telefoon) en start een zoekopdracht.
+
+## Er gaat iets mis
+
+Open eerst **`check.php`** — daar staat in negen van de tien gevallen direct
+wat er aan de hand is. Veelvoorkomende meldingen:
+
+**"config.php is niet geldig: het bestand geeft geen instellingen terug"**
+Het bestand mist de afsluitende `];`, of de eerste regel `<?php` is
+verdwenen. Dat laatste gebeurt als een FTP-programma het bestand in
+"binair" in plaats van "tekst" overzet, of als een editor het bestand
+herschrijft. Oplossing: kopieer `config.sample.php` opnieuw naar
+`config.php` en pas alléén de waarden tussen de aanhalingstekens aan —
+laat `return [` bovenaan en `];` onderaan staan.
+
+**"Controleer schrijfrechten op de data map"**
+Geef de map `data/` schrijfrechten via je FTP-programma (rechtermuisknop →
+rechten/permissions): probeer 755, en als dat niet helpt 775.
+
+**"Kon de branches niet laden"** (leeg keuzemenu op de hoofdpagina)
+De bestanden staan niet compleet op de server, of `config.php` ontbreekt.
+`check.php` wijst aan welk bestand mist.
+
+**"Alle OpenStreetMap-servers gaven een fout"**
+Meestal tijdelijk; de app probeert automatisch drie servers. Blijft het
+misgaan, dan blokkeert je hosting mogelijk uitgaand internetverkeer —
+`check.php` laat dat zien en dan kun je het bij je hostingpartij navragen.
 
 ## Weinig of geen resultaten?
 
